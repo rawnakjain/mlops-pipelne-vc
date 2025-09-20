@@ -83,13 +83,14 @@ def save_model(model, file_path: str) -> None:
 def main():
     try:
         params = load_params('params.yaml')['model_building']
-
+        print('pass paramas')
         train_data = load_data('./data/processed/train_tfidf.csv')
+        print('pass data loading')
         X_train = train_data.iloc[:, :-1].values
         y_train = train_data.iloc[:, -1].values
-
+        print('pass training')
         clf = train_model(X_train, y_train, params)
-
+        print('pass model training')
         save_model(clf, 'models/model.pkl')
     except Exception as e:
         logger.error('Failed to complete the model building process: %s', e)

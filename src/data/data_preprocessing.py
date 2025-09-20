@@ -1,19 +1,23 @@
-# data ingestion
+# data preprocessing
+
 import numpy as np
 import pandas as pd
 import os
-from sklearn.model_selection import train_test_split
-import yaml
+import re
+import nltk
+import string
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
 import logging
 
 # logging configuration
-logger = logging.getLogger('data_ingestion')
+logger = logging.getLogger('data_transformation')
 logger.setLevel('DEBUG')
 
 console_handler = logging.StreamHandler()
 console_handler.setLevel('DEBUG')
 
-file_handler = logging.FileHandler('errors.log')
+file_handler = logging.FileHandler('transformation_errors.log')
 file_handler.setLevel('ERROR')
 
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -23,80 +27,102 @@ file_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 
+nltk.download('wordnet')
+nltk.download('stopwords')
 
-def load_params(params_path: str) -> dict:
-    """Load parameters from a YAML file."""
+
+def lemmatization(text):
+    """Lemmatize the text."""
+    lemmatizer = WordNetLemmatizer()
+    text = text.split()
+    text = [lemmatizer.lemmatize(word) for word in text]
+    return " ".join(text)
+
+
+def remove_stop_words(text):
+    """Remove stop words from the text."""
+    stop_words = set(stopwords.words("english"))
+    text = [word for word in str(text).split() if word not in stop_words]
+    return " ".join(text)
+
+
+def removing_numbers(text):
+    """Remove numbers from the text."""
+    text = ''.join([char for char in text if not char.isdigit()])
+    return text
+
+
+def lower_case(text):
+    """Convert text to lower case."""
+    text = text.split()
+    text = [word.lower() for word in text]
+    return " ".join(text)
+
+
+def removing_punctuations(text):
+    """Remove punctuations from the text."""
+    text = re.sub('[%s]' % re.escape(string.punctuation), ' ', text)
+    text = text.replace('؛', "")
+    text = re.sub('\s+', ' ', text).strip()
+    return text
+
+
+def removing_urls(text):
+    """Remove URLs from the text."""
+    url_pattern = re.compile(r'https?://\S+|www\.\S+')
+    return url_pattern.sub(r'', text)
+
+
+def remove_small_sentences(df):
+    """Remove sentences with less than 3 words."""
+    for i in range(len(df)):
+        if len(df.text.iloc[i].split()) < 3:
+            df.text.iloc[i] = np.nan
+
+
+def normalize_text(df):
+    """Normalize the text data."""
     try:
-        with open(params_path, 'r') as file:
-            params = yaml.safe_load(file)
-        logger.debug('Parameters retrieved from %s', params_path)
-        return params
-    except FileNotFoundError:
-        logger.error('File not found: %s', params_path)
-        raise
-    except yaml.YAMLError as e:
-        logger.error('YAML error: %s', e)
-        raise
-    except Exception as e:
-        logger.error('Unexpected error: %s', e)
-        raise
-
-
-def load_data(data_url: str) -> pd.DataFrame:
-    """Load data from a CSV file."""
-    try:
-        df = pd.read_csv(data_url)
-        logger.debug('Data loaded from %s', data_url)
+        df['content'] = df['content'].apply(lower_case)
+        logger.debug('converted to lower case')
+        df['content'] = df['content'].apply(remove_stop_words)
+        logger.debug('stop words removed')
+        df['content'] = df['content'].apply(removing_numbers)
+        logger.debug('numbers removed')
+        df['content'] = df['content'].apply(removing_punctuations)
+        logger.debug('punctuations removed')
+        df['content'] = df['content'].apply(removing_urls)
+        logger.debug('urls')
+        df['content'] = df['content'].apply(lemmatization)
+        logger.debug('lemmatization performed')
+        logger.debug('Text normalization completed')
         return df
-    except pd.errors.ParserError as e:
-        logger.error('Failed to parse the CSV file: %s', e)
-        raise
     except Exception as e:
-        logger.error('Unexpected error occurred while loading the data: %s', e)
-        raise
-
-
-def preprocess_data(df: pd.DataFrame) -> pd.DataFrame:
-    """Preprocess the data."""
-    try:
-        df.drop(columns=['tweet_id'], inplace=True)
-        final_df = df[df['sentiment'].isin(['happiness', 'sadness'])]
-        final_df['sentiment'].replace({'happiness': 1, 'sadness': 0}, inplace=True)
-        logger.debug('Data preprocessing completed')
-        return final_df
-    except KeyError as e:
-        logger.error('Missing column in the dataframe: %s', e)
-        raise
-    except Exception as e:
-        logger.error('Unexpected error during preprocessing: %s', e)
-        raise
-
-
-def save_data(train_data: pd.DataFrame, test_data: pd.DataFrame, data_path: str) -> None:
-    """Save the train and test datasets."""
-    try:
-        raw_data_path = os.path.join(data_path, 'raw')
-        os.makedirs(raw_data_path, exist_ok=True)
-        train_data.to_csv(os.path.join(raw_data_path, "train.csv"), index=False)
-        test_data.to_csv(os.path.join(raw_data_path, "test.csv"), index=False)
-        logger.debug('Train and test data saved to %s', raw_data_path)
-    except Exception as e:
-        logger.error('Unexpected error occurred while saving the data: %s', e)
+        logger.error('Error during text normalization: %s', e)
         raise
 
 
 def main():
     try:
-        params = load_params(params_path='params.yaml')
-        test_size = params['data_ingestion']['test_size']
+        # Fetch the data from data/raw
+        train_data = pd.read_csv('./data/raw/train.csv')
+        test_data = pd.read_csv('./data/raw/test.csv')
+        logger.debug('data loaded properly')
 
-        df = load_data(
-            data_url='https://raw.githubusercontent.com/campusx-official/jupyter-masterclass/main/tweet_emotions.csv')
-        final_df = preprocess_data(df)
-        train_data, test_data = train_test_split(final_df, test_size=test_size, random_state=42)
-        save_data(train_data, test_data, data_path='./data')
+        # Transform the data
+        train_processed_data = normalize_text(train_data)
+        test_processed_data = normalize_text(test_data)
+
+        # Store the data inside data/processed
+        data_path = os.path.join("./data", "interim")
+        os.makedirs(data_path, exist_ok=True)
+
+        train_processed_data.to_csv(os.path.join(data_path, "train_processed.csv"), index=False)
+        test_processed_data.to_csv(os.path.join(data_path, "test_processed.csv"), index=False)
+
+        logger.debug('Processed data saved to %s', data_path)
     except Exception as e:
-        logger.error('Failed to complete the data ingestion process: %s', e)
+        logger.error('Failed to complete the data transformation process: %s', e)
         print(f"Error: {e}")
 
 
